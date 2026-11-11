@@ -44,14 +44,7 @@ module.exports = async function handler(req, res) {
     const {
       occasion = 'Birthday',
       theme = 'Pastel',
-      template = 'arch',
-      shape = 'Round',
-      size = 'Medium',
-      quantity = 28,
-      decoration = 'Ribbon',
-      balloonMessage = '',
-      figures = [],
-      customPrompt = '',
+      randomSeed = Date.now(),
       availableTemplates = [
         { id: 'arch', name: 'Full Balloon Arch' },
         { id: 'garland', name: 'Organic Balloon Garland' },
@@ -70,10 +63,9 @@ module.exports = async function handler(req, res) {
     } = body;
 
     const validTemplateIds = availableTemplates.map(t => t.id);
-    const validFigures = ['welcome-sign', 'main-cluster', 'number-set', 'cake-accent', 'floral-accent', 'gift-bobo'];
 
-    const systemPrompt = `You are Balloonera Party Needs Store's expert AI Balloon Design Stylist.
-Your role is to recommend 3 distinct, creative, cohesive balloon arrangement concepts tailored to the customer's occasion, theme, current studio settings, and any custom vibe prompt they provide.
+    const systemPrompt = `You are Balloonera Party Needs Store's AI Balloon Design Generator.
+Generate 3 random, distinct, creative, cohesive balloon arrangement designs suitable for party celebrations.
 
 You MUST return a valid JSON object matching this exact structure:
 {
@@ -87,33 +79,21 @@ You MUST return a valid JSON object matching this exact structure:
       "size": "One of: Small, Medium, Large",
       "quantity": 28,
       "decoration": "One of: ${availableDecorations.join(', ')}",
-      "suggestedMessage": "Short celebratory text for balloon lettering (max 40 chars)",
-      "recommendedFigures": ["1 to 3 IDs from: ${validFigures.join(', ')}"],
-      "reason": "1-2 concise sentences explaining why this arrangement, palette, and accent combination elevates their celebration."
+      "reason": "1-2 concise sentences explaining why this arrangement, palette, and accent combination works well."
     }
   ]
 }
 
 Rules:
-- Provide exactly 3 suggestions in the "suggestions" array.
-- Make the first suggestion closely honor their current arrangement or custom request, the second suggestion an elevated statement alternative, and the third a creative/trending color & layout twist.
-- Each "colors" array must contain exactly 3 valid 6-digit hex color codes (e.g. ["#e8b4d0", "#c39be8", "#f7e3b5"]) that look harmonious and realistic for party balloons.
+- Provide 3 completely different random balloon designs in the "suggestions" array (use different templates, color palettes, shapes, sizes, quantities, and decorations across the 3 options).
+- Each "colors" array must contain 3 valid 6-digit hex color codes (e.g. ["#e8b4d0", "#c39be8", "#f7e3b5"]) that look harmonious and realistic for party balloons.
 - "quantity" must be an integer between 12 and 56.`;
 
     const userContent = JSON.stringify({
-      customerSelection: {
-        occasion,
-        theme,
-        currentTemplate: template,
-        shape,
-        size,
-        quantity,
-        decoration,
-        balloonMessage,
-        placedFigures: figures,
-        customVibePrompt: customPrompt || 'Recommend cohesive balloon designs for this celebration.'
-      },
-      availableTemplates
+      occasion,
+      theme,
+      randomSeed,
+      instruction: 'Generate 3 fresh, randomized balloon arrangement designs with varied templates, colors, and accents.'
     });
 
     const models = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
@@ -132,7 +112,7 @@ Rules:
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userContent }
           ],
-          temperature: 0.7,
+          temperature: 0.9,
           max_tokens: 1400,
           response_format: { type: 'json_object' }
         })

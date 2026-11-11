@@ -47,7 +47,6 @@ home=function(){return `<section class="hero home-editorial merged-home-hero"><d
  <section class="story-strip"><div><span class="eyebrow">ABOUT BALLOONERA</span><h2>Party details, thoughtfully put together.</h2><p>Balloonera offers DIY balloon supplies and finished customized balloon arrangements. The owner reviews design inquiries and discusses final quotations personally.</p></div><div class="story-images"><img src="assets/balloonera-storefront.jpg" alt="Balloonera Party Needs storefront"><img src="assets/balloonera-team.jpg" alt="Balloonera Party Needs team"></div></section>`;};
 
 /* Original 3D model assets are preserved alongside the illustrated editor. */
-let aiCustomPromptText = '';
 const earlierStudio=studio;
 studio=function(){let html=earlierStudio();
  const editingPanel=`<section class="balloon-editor-tools" aria-label="Advanced balloon editing"><div class="editor-tools-header"><div><span class="step-label">EDIT YOUR BALLOONS</span><h4>Adjust the arrangement</h4><p>Click a balloon to select, drag it to move, or drag empty space to rotate.</p></div><span class="editor-tag">LIVE PREVIEW</span></div><div class="editor-tool-buttons"><button type="button" id="balloon-undo">↶ Undo</button><button type="button" id="balloon-add">＋ Add balloon</button><button type="button" id="balloon-remove">− Remove selected</button><button type="button" id="balloon-zoom-in">＋ Zoom</button><button type="button" id="balloon-zoom-out">− Zoom</button></div><div class="editor-view-buttons"><span>VIEW</span><div><button type="button" data-angle="front" class="active">Front</button><button type="button" data-angle="left">Left</button><button type="button" data-angle="right">Right</button><button type="button" data-angle="top">Top</button></div></div><p class="editor-cue" id="editorCue">Select a balloon to recolor it using the color swatches.</p></section>`;
@@ -60,8 +59,10 @@ studio=function(){let html=earlierStudio();
    html=html.replace('<div class="preview-bottom">',obj+'<div class="preview-bottom">');
  }
  const oldPanelHeader = `<div class="studio-panel-title"><span class="step-label">03 / IDEAS FOR YOU</span><h3>Design Suggestions AI</h3><p>Recommendations combine your occasion, chosen theme, preferred arrangement and available color palettes. These are predefined prototype rules, not a live AI model.</p></div>`;
- const newAiPanelHeader = `<div class="studio-panel-title"><span class="step-label">03 / IDEAS FOR YOU</span><h3>Design Suggestions AI</h3><p>Describe your celebration vibe or generate tailored balloon arrangements, color palettes, and decorative accents for your 3D preview.</p></div><div class="ai-prompt-composer"><label class="ai-prompt-label" for="aiVibePrompt">✦ Describe your celebration vibe (optional)</label><textarea id="aiVibePrompt" rows="2" maxlength="200" placeholder="e.g. Butterfly 18th birthday in lavender & gold, romantic anniversary..." oninput="aiCustomPromptText=this.value">${escapeHTML(aiCustomPromptText)}</textarea><div class="ai-quick-chips" role="group" aria-label="Quick AI vibe prompts"><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Butterfly 18th birthday in lavender & gold')">🦋 Butterfly 18th</button><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Royal purple & gold grand celebration')">✨ Royal Purple & Gold</button><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Soft pastel garden celebration with floral accents')">🌸 Pastel Floral</button><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Elegant romantic rose gold & champagne setup')">🥂 Rose Gold Glam</button></div><button type="button" id="aiGenerateBtn" class="ai-generate-btn" onclick="generateAiDesignSuggestions(true)">✦ Generate AI Balloon Suggestions</button></div><div id="aiStatusNote" class="ai-status-note" hidden></div>`;
+ const newAiPanelHeader = `<div class="studio-panel-title"><span class="step-label">03 / IDEAS FOR YOU</span><h3>Design Suggestions AI</h3><p>Recommendations combine your occasion, chosen theme, preferred arrangement and available color palettes.</p></div><div id="aiStatusNote" class="ai-status-note" hidden></div>`;
  html = html.replace(oldPanelHeader, newAiPanelHeader);
+ html = html.replace('<div class="divider"></div><h3>Current design</h3>', '<div class="ai-generate-footer"><button type="button" id="aiGenerateBtn" class="ai-generate-btn" onclick="generateAiDesignSuggestions(true)">✦ Generate AI Balloon Suggestions</button></div><div class="divider"></div><h3>Current design</h3>');
+ html = html.replace('<div class="personalized-message canvas-message" id="personalizedMessage" aria-live="polite"></div>', '');
  return html;
 };
 
@@ -165,9 +166,8 @@ studio=function(){let html=earlierStudio();
 
  async function callGroqDirectWithEnv(payload, apiKey) {
    const validTemplateIds = payload.availableTemplates.map(t => t.id);
-   const validFigures = ['welcome-sign', 'main-cluster', 'number-set', 'cake-accent', 'floral-accent', 'gift-bobo'];
-   const systemPrompt = `You are Balloonera Party Needs Store's expert AI Balloon Design Stylist.
-Your role is to recommend 3 distinct, creative, cohesive balloon arrangement concepts tailored to the customer's occasion, theme, current studio settings, and any custom vibe prompt they provide.
+   const systemPrompt = `You are Balloonera Party Needs Store's AI Balloon Design Generator.
+Generate 3 random, distinct, creative, cohesive balloon arrangement designs suitable for party celebrations.
 
 You MUST return a valid JSON object matching this exact structure:
 {
@@ -181,15 +181,13 @@ You MUST return a valid JSON object matching this exact structure:
       "size": "One of: Small, Medium, Large",
       "quantity": 28,
       "decoration": "One of: ${payload.availableDecorations.join(', ')}",
-      "suggestedMessage": "Short celebratory text for balloon lettering (max 40 chars)",
-      "recommendedFigures": ["1 to 3 IDs from: ${validFigures.join(', ')}"],
-      "reason": "1-2 concise sentences explaining why this arrangement, palette, and accent combination elevates their celebration."
+      "reason": "1-2 concise sentences explaining why this arrangement, palette, and accent combination works well."
     }
   ]
 }
 
 Rules:
-- Provide 3 suggestions in the "suggestions" array.
+- Provide 3 completely different random balloon designs in the "suggestions" array (use different templates, color palettes, shapes, sizes, quantities, and decorations across the 3 options).
 - Each "colors" array must contain 3 valid 6-digit hex color codes (e.g. ["#e8b4d0", "#c39be8", "#f7e3b5"]).
 - "quantity" must be an integer between 12 and 56.`;
 
@@ -209,7 +207,7 @@ Rules:
            { role: 'system', content: systemPrompt },
            { role: 'user', content: JSON.stringify(payload) }
          ],
-         temperature: 0.7,
+         temperature: 0.9,
          max_tokens: 1400,
          response_format: { type: 'json_object' }
        })
@@ -273,9 +271,6 @@ Rules:
    const cleanQty = Math.max(8, Math.min(60, Math.round(Number(s.quantity) || quantity)));
    const validDecors = ['None', ...(data.settings?.decorations || [])];
    const cleanDecor = validDecors.includes(s.decoration) ? s.decoration : decoration;
-   const cleanFigures = Array.isArray(s.recommendedFigures)
-     ? s.recommendedFigures.filter(fid => getFigureById(fid)).slice(0, 3)
-     : [];
 
    return {
      title: String(s.title || validTemplate.name).slice(0, 50),
@@ -287,8 +282,6 @@ Rules:
      size: cleanSize,
      quantity: cleanQty,
      decoration: cleanDecor,
-     suggestedMessage: String(s.suggestedMessage || '').slice(0, 60),
-     recommendedFigures: cleanFigures,
      reason: String(s.reason || 'Tailored by AI for your selected celebration and theme.')
    };
  }
@@ -299,14 +292,10 @@ Rules:
      .filter(item => !aiDismissedIndexes.has(item.idx));
 
    if (!visible.length) {
-     return `<p class="muted tiny">All AI suggestions dismissed. Click <strong>✦ Generate AI Balloon Suggestions</strong> above for fresh ideas.</p>`;
+     return `<p class="muted tiny">All AI suggestions dismissed. Click <strong>✦ Generate AI Balloon Suggestions</strong> below for fresh random ideas.</p>`;
    }
 
    return visible.map(({ s, idx }, displayIdx) => {
-     const figLabels = s.recommendedFigures
-       .map(fid => getFigureById(fid)?.label)
-       .filter(Boolean)
-       .join(', ');
      return `<article class="recommendation ai-card">
        <div class="recommendation-top">
          <span class="ai-card-badge">✦ AI SUGGESTION · IDEA ${String(displayIdx + 1).padStart(2, '0')}</span>
@@ -318,8 +307,6 @@ Rules:
          <span class="ai-meta-tag">${escapeHTML(s.templateName)}</span>
          <span class="ai-meta-tag">${s.quantity} ${escapeHTML(s.size)} ${escapeHTML(s.shape)}</span>
          ${s.decoration && s.decoration !== 'None' ? `<span class="ai-meta-tag">✦ ${escapeHTML(s.decoration)}</span>` : ''}
-         ${figLabels ? `<span class="ai-meta-tag">▣ ${escapeHTML(figLabels)}</span>` : ''}
-         ${s.suggestedMessage ? `<span class="ai-meta-tag">“${escapeHTML(s.suggestedMessage)}”</span>` : ''}
        </div>
        <div class="ai-palette-row">
          <div class="palette-dots" aria-label="AI color palette preview">
@@ -358,10 +345,7 @@ Rules:
    if (statusEl) {
      if (aiIsLoading) {
        statusEl.hidden = false;
-       statusEl.innerHTML = `<span>Analyzing your ${escapeHTML(occasion.toLowerCase())} arrangement...</span>`;
-     } else if (aiGeneratedSuggestions.length > 0) {
-       statusEl.hidden = false;
-       statusEl.innerHTML = `<span>✦ ${aiGeneratedSuggestions.length} personalized ideas ready</span>`;
+       statusEl.innerHTML = `<span>Generating random balloon designs...</span>`;
      } else {
        statusEl.hidden = true;
      }
@@ -374,13 +358,6 @@ Rules:
      wrap.innerHTML = renderAiCardsHtml();
    }
  }
-
- window.setAiQuickVibe = function(vibeText) {
-   aiCustomPromptText = vibeText;
-   const input = document.getElementById('aiVibePrompt');
-   if (input) input.value = vibeText;
-   window.generateAiDesignSuggestions(true);
- };
 
  window.dismissAiSuggestion = function(idx) {
    aiDismissedIndexes.add(idx);
@@ -406,18 +383,7 @@ Rules:
    size = s.size;
    quantity = s.quantity;
    decoration = s.decoration;
-   if (s.suggestedMessage) {
-     balloonMessage = s.suggestedMessage;
-   }
-   if (Array.isArray(s.recommendedFigures) && s.recommendedFigures.length > 0) {
-     const coords = [[50, 26], [24, 58], [76, 58]];
-     draftMarkers = s.recommendedFigures.map((figureId, i) => ({
-       id: 'ai-marker-' + id(),
-       figureId,
-       x: coords[i % coords.length][0],
-       y: coords[i % coords.length][1]
-     }));
-   }
+   balloonMessage = '';
    if (typeof window.resetStudioSceneForAi === 'function') window.resetStudioSceneForAi();
    render();
    toast(`Applied AI concept: ${s.title}`);
@@ -425,8 +391,6 @@ Rules:
 
  window.generateAiDesignSuggestions = async function(showToastOnDone = true) {
    if (aiIsLoading) return;
-   const input = document.getElementById('aiVibePrompt');
-   if (input) aiCustomPromptText = input.value.trim();
 
    aiIsLoading = true;
    aiDismissedIndexes.clear();
@@ -435,14 +399,7 @@ Rules:
    const payload = {
      occasion,
      theme,
-     template: selectedTemplate,
-     shape,
-     size,
-     quantity,
-     decoration,
-     balloonMessage,
-     figures: draftMarkers.map(m => m.figureId),
-     customPrompt: aiCustomPromptText || studioSpecialRequest || '',
+     randomSeed: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
      availableTemplates: data.templates.map(t => ({ id: t.id, name: t.name, type: t.type })),
      availableDecorations: ['None', ...(data.settings?.decorations || [])]
    };
