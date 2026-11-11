@@ -47,6 +47,7 @@ home=function(){return `<section class="hero home-editorial merged-home-hero"><d
  <section class="story-strip"><div><span class="eyebrow">ABOUT BALLOONERA</span><h2>Party details, thoughtfully put together.</h2><p>Balloonera offers DIY balloon supplies and finished customized balloon arrangements. The owner reviews design inquiries and discusses final quotations personally.</p></div><div class="story-images"><img src="assets/balloonera-storefront.jpg" alt="Balloonera Party Needs storefront"><img src="assets/balloonera-team.jpg" alt="Balloonera Party Needs team"></div></section>`;};
 
 /* Original 3D model assets are preserved alongside the illustrated editor. */
+let aiCustomPromptText = '';
 const earlierStudio=studio;
 studio=function(){let html=earlierStudio();
  const editingPanel=`<section class="balloon-editor-tools" aria-label="Advanced balloon editing"><div class="editor-tools-header"><div><span class="step-label">EDIT YOUR BALLOONS</span><h4>Adjust the arrangement</h4><p>Click a balloon to select, drag it to move, or drag empty space to rotate.</p></div><span class="editor-tag">LIVE PREVIEW</span></div><div class="editor-tool-buttons"><button type="button" id="balloon-undo">↶ Undo</button><button type="button" id="balloon-add">＋ Add balloon</button><button type="button" id="balloon-remove">− Remove selected</button><button type="button" id="balloon-zoom-in">＋ Zoom</button><button type="button" id="balloon-zoom-out">− Zoom</button></div><div class="editor-view-buttons"><span>VIEW</span><div><button type="button" data-angle="front" class="active">Front</button><button type="button" data-angle="left">Left</button><button type="button" data-angle="right">Right</button><button type="button" data-angle="top">Top</button></div></div><p class="editor-cue" id="editorCue">Select a balloon to recolor it using the color swatches.</p></section>`;
@@ -58,6 +59,9 @@ studio=function(){let html=earlierStudio();
    const obj=`<details class="model-view-details"><summary>Open original rotatable 3D model <span>↗</span></summary><model-viewer src="${src}" poster="${poster}" alt="${title} rotatable Blender 3D model" camera-controls auto-rotate shadow-intensity="1" exposure="1" touch-action="pan-y"><img slot="poster" src="${poster}" alt="${title} reference photo" class="model-poster"></model-viewer><p class="tiny muted">This optional 3D object uses the .glb asset supplied in the original prototype. The main canvas remains editable.</p></details>`;
    html=html.replace('<div class="preview-bottom">',obj+'<div class="preview-bottom">');
  }
+ const oldPanelHeader = `<div class="studio-panel-title"><span class="step-label">03 / IDEAS FOR YOU</span><h3>Design Suggestions AI</h3><p>Recommendations combine your occasion, chosen theme, preferred arrangement and available color palettes. These are predefined prototype rules, not a live AI model.</p></div>`;
+ const newAiPanelHeader = `<div class="studio-panel-title"><span class="step-label">03 / IDEAS FOR YOU</span><div class="ai-stylist-head-row"><h3>Design Suggestions AI</h3><span class="ai-live-badge"><span class="ai-live-dot"></span>Groq AI</span></div><p>Powered by Groq AI. Describe your celebration vibe or generate tailored balloon arrangements, color palettes, and decorative accents for your 3D preview.</p></div><div class="ai-prompt-composer"><label class="ai-prompt-label" for="aiVibePrompt">✦ Describe your celebration vibe (optional)</label><textarea id="aiVibePrompt" rows="2" maxlength="200" placeholder="e.g. Butterfly 18th birthday in lavender & gold, romantic anniversary..." oninput="aiCustomPromptText=this.value">${escapeHTML(aiCustomPromptText)}</textarea><div class="ai-quick-chips" role="group" aria-label="Quick AI vibe prompts"><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Butterfly 18th birthday in lavender & gold')">🦋 Butterfly 18th</button><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Royal purple & gold grand celebration')">✨ Royal Purple & Gold</button><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Soft pastel garden celebration with floral accents')">🌸 Pastel Floral</button><button type="button" class="ai-vibe-chip" onclick="setAiQuickVibe('Elegant romantic rose gold & champagne setup')">🥂 Rose Gold Glam</button></div><button type="button" id="aiGenerateBtn" class="ai-generate-btn" onclick="generateAiDesignSuggestions(true)">✦ Generate AI Balloon Suggestions</button></div><div id="aiStatusNote" class="ai-status-note" hidden></div>`;
+ html = html.replace(oldPanelHeader, newAiPanelHeader);
  return html;
 };
 
@@ -120,6 +124,350 @@ studio=function(){let html=earlierStudio();
  currentDesign=function(){return {...formerCurrentDesign(),editedBalloonScene:{signature:sceneKey(),particles:scene.map(p=>({...p}))}};};
  const formerLoadDesign=loadDesign;
  loadDesign=function(d){pendingScene=d.editedBalloonScene||null;sceneSignature='';formerLoadDesign(d);};
+ window.resetStudioSceneForAi=function(){scene.forEach(p=>{p.color=null;});sceneSignature='';};
+})();
+
+/* ==========================================================================
+   GROQ AI BALLOON DESIGN SUGGESTIONS ENGINE
+   Reads GROQ_API_KEY via /api/ai-suggestions (Vercel) or .env (local dev)
+   ========================================================================== */
+(function(){
+ let aiGeneratedSuggestions = [];
+ let aiDismissedIndexes = new Set();
+ let aiIsLoading = false;
+ let aiLastModel = '';
+ let aiHasAutoRun = false;
+ let cachedLocalEnvKey = null;
+
+ async function loadLocalEnvGroqKey() {
+   if (cachedLocalEnvKey) return cachedLocalEnvKey;
+   try {
+     const res = await fetch('.env', { cache: 'no-store' });
+     if (!res.ok) return '';
+     const text = await res.text();
+     const match = text.match(/^\s*GROQ_API_KEY\s*=\s*([^\r\n#]+)/m);
+     if (match && match[1]) {
+       cachedLocalEnvKey = match[1].trim().replace(/^['"]|['"]$/g, '');
+       return cachedLocalEnvKey;
+     }
+   } catch (_) {}
+   return '';
+ }
+
+ async function callGroqDirectWithEnv(payload, apiKey) {
+   const validTemplateIds = payload.availableTemplates.map(t => t.id);
+   const validFigures = ['welcome-sign', 'main-cluster', 'number-set', 'cake-accent', 'floral-accent', 'gift-bobo'];
+   const systemPrompt = `You are Balloonera Party Needs Store's expert AI Balloon Design Stylist.
+Your role is to recommend 3 distinct, creative, cohesive balloon arrangement concepts tailored to the customer's occasion, theme, current studio settings, and any custom vibe prompt they provide.
+
+You MUST return a valid JSON object matching this exact structure:
+{
+  "suggestions": [
+    {
+      "title": "Short evocative concept name (max 42 chars)",
+      "templateId": "One of: ${validTemplateIds.join(', ')}",
+      "paletteName": "Name of the 3-color palette (max 28 chars)",
+      "colors": ["#HEX1", "#HEX2", "#HEX3"],
+      "shape": "One of: Round, Heart, Oval",
+      "size": "One of: Small, Medium, Large",
+      "quantity": 28,
+      "decoration": "One of: ${payload.availableDecorations.join(', ')}",
+      "suggestedMessage": "Short celebratory text for balloon lettering (max 40 chars)",
+      "recommendedFigures": ["1 to 3 IDs from: ${validFigures.join(', ')}"],
+      "reason": "1-2 concise sentences explaining why this arrangement, palette, and accent combination elevates their celebration."
+    }
+  ]
+}
+
+Rules:
+- Provide 3 suggestions in the "suggestions" array.
+- Each "colors" array must contain 3 valid 6-digit hex color codes (e.g. ["#e8b4d0", "#c39be8", "#f7e3b5"]).
+- "quantity" must be an integer between 12 and 56.`;
+
+   const models = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+   let lastErr = 'Groq request failed';
+
+   for (const model of models) {
+     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+       method: 'POST',
+       headers: {
+         'Authorization': `Bearer ${apiKey}`,
+         'Content-Type': 'application/json'
+       },
+       body: JSON.stringify({
+         model,
+         messages: [
+           { role: 'system', content: systemPrompt },
+           { role: 'user', content: JSON.stringify(payload) }
+         ],
+         temperature: 0.7,
+         max_tokens: 1400,
+         response_format: { type: 'json_object' }
+       })
+     });
+
+     if (!res.ok) {
+       lastErr = `Groq (${model}) status ${res.status}`;
+       continue;
+     }
+
+     const data = await res.json();
+     let raw = data?.choices?.[0]?.message?.content || '{}';
+     const match = raw.match(/\{[\s\S]*\}/);
+     if (match) raw = match[0];
+     const parsed = JSON.parse(raw);
+     if (Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0) {
+       return { model, suggestions: parsed.suggestions.slice(0, 3) };
+     }
+   }
+   throw new Error(lastErr);
+ }
+
+ async function fetchAiBalloonSuggestions(payload) {
+   try {
+     const apiRes = await fetch('/api/ai-suggestions', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify(payload)
+     });
+     const contentType = apiRes.headers.get('content-type') || '';
+     if (apiRes.ok && contentType.includes('application/json')) {
+       const json = await apiRes.json();
+       if (Array.isArray(json.suggestions) && json.suggestions.length > 0) {
+         return json;
+       }
+     }
+   } catch (_) {}
+
+   const localKey = await loadLocalEnvGroqKey();
+   if (!localKey) {
+     throw new Error('Could not reach /api/ai-suggestions or read GROQ_API_KEY from .env.');
+   }
+   return await callGroqDirectWithEnv(payload, localKey);
+ }
+
+ function normalizeHex(c, fallback) {
+   return /^#[0-9a-fA-F]{6}$/.test(String(c || '').trim()) ? String(c).trim() : fallback;
+ }
+
+ function sanitizeSuggestion(s, idx) {
+   const validTemplate = data.templates.find(t => t.id === s.templateId) || getTmpl(selectedTemplate);
+   const fallbackPalette = CURATED_PALETTES[idx % CURATED_PALETTES.length].colors;
+   const rawColors = Array.isArray(s.colors) ? s.colors : [];
+   const cleanColors = [
+     normalizeHex(rawColors[0], fallbackPalette[0]),
+     normalizeHex(rawColors[1], fallbackPalette[1]),
+     normalizeHex(rawColors[2], fallbackPalette[2])
+   ];
+   const cleanShape = ['Round', 'Heart', 'Oval'].includes(s.shape) ? s.shape : shape;
+   const cleanSize = ['Small', 'Medium', 'Large'].includes(s.size) ? s.size : size;
+   const cleanQty = Math.max(8, Math.min(60, Math.round(Number(s.quantity) || quantity)));
+   const validDecors = ['None', ...(data.settings?.decorations || [])];
+   const cleanDecor = validDecors.includes(s.decoration) ? s.decoration : decoration;
+   const cleanFigures = Array.isArray(s.recommendedFigures)
+     ? s.recommendedFigures.filter(fid => getFigureById(fid)).slice(0, 3)
+     : [];
+
+   return {
+     title: String(s.title || validTemplate.name).slice(0, 50),
+     templateId: validTemplate.id,
+     templateName: validTemplate.name,
+     paletteName: String(s.paletteName || 'AI Custom Palette').slice(0, 32),
+     colors: cleanColors,
+     shape: cleanShape,
+     size: cleanSize,
+     quantity: cleanQty,
+     decoration: cleanDecor,
+     suggestedMessage: String(s.suggestedMessage || '').slice(0, 60),
+     recommendedFigures: cleanFigures,
+     reason: String(s.reason || 'Tailored by Groq AI for your selected celebration and theme.')
+   };
+ }
+
+ function renderAiCardsHtml() {
+   const visible = aiGeneratedSuggestions
+     .map((s, idx) => ({ s, idx }))
+     .filter(item => !aiDismissedIndexes.has(item.idx));
+
+   if (!visible.length) {
+     return `<p class="muted tiny">All AI suggestions dismissed. Click <strong>✦ Generate AI Balloon Suggestions</strong> above for fresh ideas.</p>`;
+   }
+
+   return visible.map(({ s, idx }, displayIdx) => {
+     const figLabels = s.recommendedFigures
+       .map(fid => getFigureById(fid)?.label)
+       .filter(Boolean)
+       .join(', ');
+     return `<article class="recommendation ai-card">
+       <div class="recommendation-top">
+         <span class="ai-card-badge">✦ GROQ AI · IDEA ${String(displayIdx + 1).padStart(2, '0')}</span>
+         <button type="button" onclick="dismissAiSuggestion(${idx})" aria-label="Dismiss ${escapeHTML(s.title)}">×</button>
+       </div>
+       <h4>${escapeHTML(s.title)}</h4>
+       <p>${escapeHTML(s.reason)}</p>
+       <div class="ai-card-meta">
+         <span class="ai-meta-tag">${escapeHTML(s.templateName)}</span>
+         <span class="ai-meta-tag">${s.quantity} ${escapeHTML(s.size)} ${escapeHTML(s.shape)}</span>
+         ${s.decoration && s.decoration !== 'None' ? `<span class="ai-meta-tag">✦ ${escapeHTML(s.decoration)}</span>` : ''}
+         ${figLabels ? `<span class="ai-meta-tag">▣ ${escapeHTML(figLabels)}</span>` : ''}
+         ${s.suggestedMessage ? `<span class="ai-meta-tag">“${escapeHTML(s.suggestedMessage)}”</span>` : ''}
+       </div>
+       <div class="ai-palette-row">
+         <div class="palette-dots" aria-label="AI color palette preview">
+           ${s.colors.map(c => `<span style="background:${c}" title="${c}"></span>`).join('')}
+         </div>
+         <span class="ai-palette-name">${escapeHTML(s.paletteName)}</span>
+       </div>
+       <div class="recommend-actions">
+         <button type="button" onclick="applyAiDesignSuggestion(${idx})">Apply full AI design</button>
+         <button type="button" onclick="applyAiColorsOnly(${idx})">Colors only</button>
+       </div>
+     </article>`;
+   }).join('');
+ }
+
+ function renderAiLoadingSkeleton() {
+   return [1, 2, 3].map(() => `
+     <div class="ai-skeleton-card" aria-hidden="true">
+       <div class="ai-skeleton-line short"></div>
+       <div class="ai-skeleton-line med"></div>
+       <div class="ai-skeleton-line full"></div>
+       <div class="ai-skeleton-line short"></div>
+     </div>
+   `).join('');
+ }
+
+ function updateAiPanelDom() {
+   const btn = document.getElementById('aiGenerateBtn');
+   if (btn) {
+     btn.disabled = aiIsLoading;
+     btn.innerHTML = aiIsLoading
+       ? `<span class="ai-spinner" aria-hidden="true"></span> Styling with Groq AI...`
+       : `✦ Generate AI Balloon Suggestions`;
+   }
+   const statusEl = document.getElementById('aiStatusNote');
+   if (statusEl) {
+     if (aiIsLoading) {
+       statusEl.hidden = false;
+       statusEl.innerHTML = `<span>Analyzing your ${escapeHTML(occasion.toLowerCase())} arrangement...</span>`;
+     } else if (aiGeneratedSuggestions.length > 0) {
+       statusEl.hidden = false;
+       statusEl.innerHTML = `<span>✦ ${aiGeneratedSuggestions.length} ideas generated by Groq AI</span>`;
+     } else {
+       statusEl.hidden = true;
+     }
+   }
+   const wrap = document.getElementById('suggestions');
+   if (!wrap) return;
+   if (aiIsLoading) {
+     wrap.innerHTML = renderAiLoadingSkeleton();
+   } else if (aiGeneratedSuggestions.length > 0) {
+     wrap.innerHTML = renderAiCardsHtml();
+   }
+ }
+
+ window.setAiQuickVibe = function(vibeText) {
+   aiCustomPromptText = vibeText;
+   const input = document.getElementById('aiVibePrompt');
+   if (input) input.value = vibeText;
+   window.generateAiDesignSuggestions(true);
+ };
+
+ window.dismissAiSuggestion = function(idx) {
+   aiDismissedIndexes.add(idx);
+   updateAiPanelDom();
+ };
+
+ window.applyAiColorsOnly = function(idx) {
+   const s = aiGeneratedSuggestions[idx];
+   if (!s) return;
+   colors = [...s.colors];
+   if (typeof window.resetStudioSceneForAi === 'function') window.resetStudioSceneForAi();
+   drawStudio();
+   renderSuggestionsSummaryOnly();
+   toast(`AI palette "${s.paletteName}" applied!`);
+ };
+
+ window.applyAiDesignSuggestion = function(idx) {
+   const s = aiGeneratedSuggestions[idx];
+   if (!s) return;
+   selectedTemplate = s.templateId;
+   colors = [...s.colors];
+   shape = s.shape;
+   size = s.size;
+   quantity = s.quantity;
+   decoration = s.decoration;
+   if (s.suggestedMessage) {
+     balloonMessage = s.suggestedMessage;
+   }
+   if (Array.isArray(s.recommendedFigures) && s.recommendedFigures.length > 0) {
+     const coords = [[50, 26], [24, 58], [76, 58]];
+     draftMarkers = s.recommendedFigures.map((figureId, i) => ({
+       id: 'ai-marker-' + id(),
+       figureId,
+       x: coords[i % coords.length][0],
+       y: coords[i % coords.length][1]
+     }));
+   }
+   if (typeof window.resetStudioSceneForAi === 'function') window.resetStudioSceneForAi();
+   render();
+   toast(`Applied AI concept: ${s.title}`);
+ };
+
+ window.generateAiDesignSuggestions = async function(showToastOnDone = true) {
+   if (aiIsLoading) return;
+   const input = document.getElementById('aiVibePrompt');
+   if (input) aiCustomPromptText = input.value.trim();
+
+   aiIsLoading = true;
+   aiDismissedIndexes.clear();
+   updateAiPanelDom();
+
+   const payload = {
+     occasion,
+     theme,
+     template: selectedTemplate,
+     shape,
+     size,
+     quantity,
+     decoration,
+     balloonMessage,
+     figures: draftMarkers.map(m => m.figureId),
+     customPrompt: aiCustomPromptText || studioSpecialRequest || '',
+     availableTemplates: data.templates.map(t => ({ id: t.id, name: t.name, type: t.type })),
+     availableDecorations: ['None', ...(data.settings?.decorations || [])]
+   };
+
+   try {
+     const result = await fetchAiBalloonSuggestions(payload);
+     aiLastModel = result.model || 'Groq AI';
+     aiGeneratedSuggestions = result.suggestions.map((s, idx) => sanitizeSuggestion(s, idx));
+     aiIsLoading = false;
+     updateAiPanelDom();
+     if (showToastOnDone) {
+       toast('Groq AI generated fresh balloon design suggestions!');
+     }
+   } catch (err) {
+     aiIsLoading = false;
+     aiGeneratedSuggestions = [];
+     updateAiPanelDom();
+     renderSuggestions();
+     if (showToastOnDone) {
+       toast('Using curated suggestions (AI service unreachable).');
+     }
+   }
+ };
+
+ const priorRenderSuggestions = renderSuggestions;
+ renderSuggestions = function() {
+   priorRenderSuggestions();
+   if (aiIsLoading || aiGeneratedSuggestions.length > 0) {
+     updateAiPanelDom();
+   } else if (page === 'studio' && role === 'customer' && !aiHasAutoRun) {
+     aiHasAutoRun = true;
+     window.generateAiDesignSuggestions(false);
+   }
+ };
 })();
 
 /* ==========================================================================
