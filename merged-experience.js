@@ -39,7 +39,7 @@ gallerySection=realGallery;
 function browseMainOccasion(name){selectPackageCategory(name);go('packages');}
 function mainOccasionCard(o,i){const types=['bouquet','garland','column','arch'];const colorsList=[['#eab8d7','#c6a8eb','#e0c08d'],['#9676bf','#f6e2ed','#b48bd2'],['#4d2878','#cab4ee','#d2afe4'],['#eae4f4','#b99ada','#764fa6']];return `<button type="button" class="occasion-tile" onclick="browseMainOccasion('${o.name}')"><div class="occasion-figure">${balloonSvg(types[i],colorsList[i])}</div><div class="occasion-tile-bottom"><span class="occasion-number">0${i+1}</span><strong>${escapeHTML(o.name)}</strong><span class="occasion-arrow">↗</span></div></button>`;}
 home=function(){return `<section class="hero home-editorial merged-home-hero"><div class="hero-copy"><div class="eyebrow">BALLOONERA PARTY NEEDS STORE</div><h1>Dream it.<br><em>Design it.</em><br>Celebrate it.</h1><p>Explore our real balloon creations, choose an occasion, and make every detail your own with our interactive design studio.</p><div class="actions">${btn('Start customizing ↗','go(\"studio\")')}${btn('Explore packages','go(\"packages\")','btn secondary')}</div><div class="hero-smallprint"><span><span class="purple-dot"></span> Custom balloon arrangements</span><span><span class="purple-dot"></span> DIY party supplies</span></div></div>
- <div class="hero-brand-panel"><div class="brand-panel-inner"><div class="brand-panel-kicker">Make your moments memorable</div><img src="assets/balloonera-official-logo.png" alt="Balloonera Party Needs Store original official logo" class="hero-brand-image"><span class="brand-panel-rule"></span><p>Creative details for celebrations big and small.</p></div></div></section>
+ <div class="hero-brand-panel"><div class="hero-decor-layer" aria-hidden="true"><span class="hero-float-orb orb-a"></span><span class="hero-float-orb orb-b"></span><span class="hero-float-sparkle sp-1">✦</span><span class="hero-float-sparkle sp-2">✧</span></div><div class="brand-panel-inner"><div class="brand-panel-kicker">Make your moments memorable</div><img src="assets/balloonera-official-logo.png" alt="Balloonera Party Needs Store original official logo" class="hero-brand-image"><span class="brand-panel-rule"></span><p>Creative details for celebrations big and small.</p></div></div></section>
  <div class="benefit-strip"><span><b>01</b> <strong>Find your occasion</strong></span><span><b>02</b> <strong>Customize the arrangement</strong></span><span><b>03</b> <strong>Send for owner review</strong></span></div>
  <section class="section occasion-section"><div class="editorial-heading"><div><span class="eyebrow">CHOOSE YOUR CELEBRATION</span><h2>Four occasions. Endless personal touches.</h2><p>Start with the kind of moment you're celebrating.</p></div><button class="text-link" onclick="go('packages')">See all packages ↗</button></div><div class="occasion-tile-grid">${OCCASIONS.map(mainOccasionCard).join('')}</div></section>
  ${realGallery()}
@@ -121,4 +121,261 @@ studio=function(){let html=earlierStudio();
  const formerLoadDesign=loadDesign;
  loadDesign=function(d){pendingScene=d.editedBalloonScene||null;sceneSignature='';formerLoadDesign(d);};
 })();
+
+/* ==========================================================================
+   UI ENHANCEMENT RUNTIME:
+   Page Transitions, Scroll Reveal Observer, Counters, Parallax & Micro-Interactions
+   ========================================================================== */
+(function(){
+ const prefersReducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+ let revealObserver = null;
+ let toastTimer = null;
+
+ /* 1. Scroll-Triggered Reveal Engine (IntersectionObserver) */
+ function setupScrollReveals(root = document) {
+   const headingTargets = root.querySelectorAll('.editorial-heading, .section-head, .collection-intro, .studio-heading, .catalog-title-row');
+   headingTargets.forEach(el => {
+     if (!el.hasAttribute('data-reveal')) el.setAttribute('data-reveal', 'fade-up');
+   });
+
+   const blockTargets = root.querySelectorAll('.benefit-strip, .home-callout, .story-strip, .pricing-note, .catalog-side, .studio-layout > .panel, .panel:not(.studio-layout > .panel)');
+   blockTargets.forEach((el, idx) => {
+     if (!el.hasAttribute('data-reveal')) {
+       el.setAttribute('data-reveal', 'fade-up');
+       el.style.setProperty('--stagger-index', String(Math.min(idx, 3)));
+     }
+   });
+
+   const staggerGroups = root.querySelectorAll('.occasion-tile-grid, .portfolio-grid, .catalog-grid, .cards, .dashboard, .owner-package-grid, .owner-template-grid, #suggestions');
+   staggerGroups.forEach(group => {
+     Array.from(group.children).forEach((child, idx) => {
+       if (!child.hasAttribute('data-reveal')) {
+         child.setAttribute('data-reveal', 'scale-in');
+         child.style.setProperty('--stagger-index', String(idx % 8));
+       }
+     });
+   });
+
+   const allRevealNodes = root.querySelectorAll('[data-reveal]:not(.is-visible)');
+   if (prefersReducedMotion() || !('IntersectionObserver' in window)) {
+     allRevealNodes.forEach(el => el.classList.add('is-visible'));
+     return;
+   }
+
+   if (!revealObserver) {
+     revealObserver = new IntersectionObserver((entries, obs) => {
+       entries.forEach(entry => {
+         if (entry.isIntersecting) {
+           entry.target.classList.add('is-visible');
+           animateCounterIfApplicable(entry.target);
+           obs.unobserve(entry.target);
+         }
+       });
+     }, { threshold: 0.1, rootMargin: '0px 0px -32px 0px' });
+   }
+
+   allRevealNodes.forEach(el => {
+     const rect = el.getBoundingClientRect();
+     if (rect.top < window.innerHeight * 0.92 && rect.bottom > 0) {
+       el.classList.add('is-visible');
+       animateCounterIfApplicable(el);
+     } else {
+       revealObserver.observe(el);
+     }
+   });
+ }
+
+ /* 2. Animated Statistics & Numerical Counters */
+ function animateNumber(el, targetVal, suffix = '', prefix = '') {
+   if (prefersReducedMotion() || el.dataset.counted === 'true' || !Number.isFinite(targetVal) || targetVal <= 0) return;
+   el.dataset.counted = 'true';
+   const duration = 850;
+   const start = performance.now();
+   function tick(now) {
+     const progress = Math.min(1, (now - start) / duration);
+     const eased = 1 - Math.pow(1 - progress, 3);
+     const current = Math.round(targetVal * eased);
+     el.textContent = `${prefix}${current}${suffix}`;
+     if (progress < 1) requestAnimationFrame(tick);
+     else el.textContent = `${prefix}${targetVal}${suffix}`;
+   }
+   requestAnimationFrame(tick);
+ }
+
+ function animateCounterIfApplicable(container) {
+   if (container.classList.contains('metric')) {
+     const strong = container.querySelector('strong');
+     if (strong) {
+       const num = parseInt(strong.textContent.trim(), 10);
+       if (num > 0) animateNumber(strong, num);
+     }
+   }
+   const badge = container.classList.contains('portfolio-photo-count')
+     ? container
+     : container.querySelector?.('.portfolio-photo-count');
+   if (badge && !badge.dataset.counted) {
+     const m = /^(\d+)(\s+.*)$/.exec(badge.textContent.trim());
+     if (m) animateNumber(badge, parseInt(m[1], 10), m[2]);
+   }
+ }
+
+ /* 3. Progressive Image Loading & Skeleton Shimmer */
+ function setupImageReveals(root = document) {
+   const imgs = root.querySelectorAll('.work-photo img, .catalog-image img, .story-images img');
+   imgs.forEach(img => {
+     const wrap = img.parentElement;
+     if (!wrap) return;
+     if (img.complete && img.naturalWidth > 0) {
+       wrap.classList.remove('is-loading');
+       img.classList.add('img-loaded');
+     } else {
+       wrap.classList.add('is-loading');
+       img.addEventListener('load', () => {
+         wrap.classList.remove('is-loading');
+         img.classList.add('img-loaded');
+       }, { once: true });
+       img.addEventListener('error', () => {
+         wrap.classList.remove('is-loading');
+       }, { once: true });
+     }
+   });
+ }
+
+ /* 4. Hero Interactive Mouse Parallax */
+ function setupHeroParallax() {
+   if (prefersReducedMotion()) return;
+   const heroPanel = document.querySelector('.hero-brand-panel');
+   if (!heroPanel || heroPanel.dataset.parallaxWired === 'true') return;
+   heroPanel.dataset.parallaxWired = 'true';
+   heroPanel.addEventListener('pointermove', e => {
+     if (window.innerWidth <= 760) return;
+     const rect = heroPanel.getBoundingClientRect();
+     const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+     const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+     heroPanel.style.setProperty('--mx', nx.toFixed(3));
+     heroPanel.style.setProperty('--my', ny.toFixed(3));
+   }, { passive: true });
+   heroPanel.addEventListener('pointerleave', () => {
+     heroPanel.style.setProperty('--mx', '0');
+     heroPanel.style.setProperty('--my', '0');
+   });
+ }
+
+ /* 5. Top Progress Bar Pulse & Page Transition */
+ function pulseProgressBar() {
+   const bar = document.getElementById('page-transition-bar');
+   if (!bar || prefersReducedMotion()) return;
+   bar.classList.add('is-active');
+   clearTimeout(bar._hideTimer);
+   bar._hideTimer = setTimeout(() => {
+     bar.classList.remove('is-active');
+   }, 360);
+ }
+
+ function enhanceCurrentDOM(root = document) {
+   setupScrollReveals(root);
+   setupImageReveals(root);
+   setupHeroParallax();
+ }
+
+ const baseRender = render;
+ render = function() {
+   baseRender();
+   const mainEl = document.getElementById('content');
+   if (mainEl && !prefersReducedMotion()) {
+     mainEl.classList.remove('page-enter');
+     void mainEl.offsetWidth;
+     mainEl.classList.add('page-enter');
+   }
+   requestAnimationFrame(() => enhanceCurrentDOM());
+ };
+
+ const baseGo = go;
+ go = function(targetPage) {
+   pulseProgressBar();
+   baseGo(targetPage);
+ };
+
+ /* Smooth sub-grid transitions for gallery filter, expand/collapse & package categories */
+ const baseFilterMergedGallery = filterMergedGallery;
+ filterMergedGallery = function(category) {
+   baseFilterMergedGallery(category);
+   const content = document.querySelector('#merged-work-content');
+   if (content) {
+     content.classList.remove('grid-transition-enter');
+     void content.offsetWidth;
+     content.classList.add('grid-transition-enter');
+     enhanceCurrentDOM(content);
+   }
+ };
+
+ const baseToggleGallery = toggleGallery;
+ toggleGallery = function() {
+   baseToggleGallery();
+   const content = document.querySelector('#merged-work-content');
+   if (content) {
+     content.classList.remove('grid-transition-enter');
+     void content.offsetWidth;
+     content.classList.add('grid-transition-enter');
+     enhanceCurrentDOM(content);
+   }
+ };
+
+ const baseRenderSuggestions = renderSuggestions;
+ renderSuggestions = function() {
+   baseRenderSuggestions();
+   const wrap = document.getElementById('suggestions');
+   if (wrap) setupScrollReveals(wrap.parentElement || document);
+ };
+
+ /* 6. Smooth Modal Exit Transition */
+ closeModal = function() {
+   const m = document.getElementById('modal');
+   if (!m) return;
+   if (prefersReducedMotion()) {
+     m.remove();
+     return;
+   }
+   m.id = 'modal-closing';
+   m.classList.add('is-closing');
+   setTimeout(() => m.remove(), 200);
+ };
+
+ /* 7. Enhanced Toast Notification with Animated Checkmark & Progress Bar */
+ toast = function(msg) {
+   const el = document.getElementById('toast');
+   if (!el) return;
+   el.removeAttribute('style');
+   el.className = 'enhanced-toast';
+   el.innerHTML = `<span class="toast-check-badge" aria-hidden="true">✓</span><span>${escapeHTML(msg)}</span><span class="toast-progress" aria-hidden="true"></span>`;
+   void el.offsetWidth;
+   el.classList.add('is-showing');
+   clearTimeout(toastTimer);
+   toastTimer = setTimeout(() => {
+     el.classList.remove('is-showing');
+   }, 3000);
+ };
+
+ /* 8. Sticky Header Scroll Elevation & Button Click Ripple */
+ window.addEventListener('scroll', () => {
+   const hdr = document.querySelector('header');
+   if (hdr) hdr.classList.toggle('is-scrolled', window.scrollY > 12);
+ }, { passive: true });
+
+ document.addEventListener('pointerdown', e => {
+   if (prefersReducedMotion()) return;
+   const btnEl = e.target.closest('.btn, .header-start-designing, .header-signin, .login-submit');
+   if (!btnEl) return;
+   const rect = btnEl.getBoundingClientRect();
+   const size = Math.max(rect.width, rect.height);
+   const ripple = document.createElement('span');
+   ripple.className = 'btn-ripple';
+   ripple.style.width = ripple.style.height = `${size}px`;
+   ripple.style.left = `${e.clientX - rect.left - size / 2}px`;
+   ripple.style.top = `${e.clientY - rect.top - size / 2}px`;
+   btnEl.appendChild(ripple);
+   ripple.addEventListener('animationend', () => ripple.remove(), { once: true });
+ }, { passive: true });
+})();
+
 render();
